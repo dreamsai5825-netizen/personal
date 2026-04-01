@@ -50,6 +50,16 @@ Every package extends `tsconfig.base.json` which sets `composite: true`. The roo
 
 ## Packages
 
+### `artifacts/firebase-app` (`@workspace/firebase-app`)
+
+OmniServe — React + Vite + Firebase/Firestore multi-service platform app. Served at `/` (port assigned by Replit workflow). Key features:
+- **Firebase Auth** + **Firestore** (project: oneserve-11)
+- **Service Worker booking system**: customers broadcast requests → first worker to accept wins; customers can reject and get reassigned
+- **Service categories**: plumber, electrician, ac_repair, car_wash, mechanic_bike, mechanic_car, cleaning
+- **Mechanic sub-categories** (bike/car) selected at signup and on booking
+- Key files: `src/App.tsx` (React Router routes), `src/firebase.ts` (Firebase init), `src/AuthContext.tsx`, `src/types.ts`, `src/components/Login.tsx` (service worker signup with category grid), `src/components/HomeServices.tsx` (broadcast booking), `src/components/ServiceWorkerDashboard.tsx` (worker portal)
+- Firestore collections: `users` (profiles with `serviceWorkerProfile`), `service_bookings` (status flow: broadcasting → worker_assigned → in_progress → completed)
+
 ### `artifacts/api-server` (`@workspace/api-server`)
 
 Express 5 API server. Routes live in `src/routes/` and use `@workspace/api-zod` for request and response validation and `@workspace/db` for persistence.

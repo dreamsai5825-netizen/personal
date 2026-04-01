@@ -1,0 +1,172 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Fields: userId, name, email, phone, role, profileImage, createdAt, status, walletBalance
+    //
+    // Collection: addresses
+    // Fields: addressId, userId, houseNumber, street, city, state, pincode, latitude, longitude, label
+    //
+    // Collection: vendors
+    // Fields: vendorId, ownerId, vendorName, vendorType, description, phone, email, address, latitude, longitude, rating, isActive
+    //
+    // Collection: products
+    // Fields: productId, vendorId, name, description, price, category, imageURL, stock, isAvailable
+    //
+    // Collection: services
+    // Fields: serviceId, vendorId, serviceName, category, description, basePrice, durationMinutes, isActive
+    //
+    // Collection: workers
+    // Fields: workerId, vendorId, name, phone, skills, rating, experienceYears, isAvailable
+    //
+    // Collection: delivery_partners
+    // Fields: partnerId, name, phone, vehicleType, vehicleNumber, currentLatitude, currentLongitude, status, rating, lastUpdated
+    //
+    // Collection: drivers
+    // Fields: driverId, name, phone, vehicleType, vehicleNumber, licenseNumber, currentLatitude, currentLongitude, status, rating, lastUpdated
+    //
+    // Collection: orders
+    // Fields: orderId, userId, vendorId, orderType, items, totalPrice, deliveryFee, paymentStatus, orderStatus, deliveryPartnerId, addressId, createdAt
+    //
+    // Collection: rides
+    // Fields: rideId, userId, driverId, vehicleType, pickupLatitude, pickupLongitude, dropLatitude, dropLongitude, distance, fare, status, paymentStatus, createdAt
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "mohammadayaz4217@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isVendor() {
+      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'vendor';
+    }
+
+    function isDriver() {
+      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'driver';
+    }
+
+    function isDeliveryPartner() {
+      return isAuthenticated() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'delivery_partner';
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['userId', 'name', 'email', 'role', 'createdAt']) &&
+             data.userId is string &&
+             data.name is string && data.name.size() < 100 &&
+             data.email is string &&
+             data.role in ['customer', 'vendor', 'delivery_partner', 'service_worker', 'driver', 'admin'];
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if request.auth != null && request.auth.uid == userId;
+      allow update: if (isOwner(userId) && request.resource.data.role == resource.data.role) || isAdmin();
+    }
+
+    match /addresses/{addressId} {
+      allow read: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
+      allow update: if isAuthenticated() && isOwner(resource.data.userId) && request.resource.data.userId == resource.data.userId;
+      allow delete: if isAuthenticated() && isOwner(resource.data.userId);
+    }
+
+    match /vendors/{vendorId} {
+      allow read: if true; // Publicly readable
+      allow create: if isAdmin() || (isVendor() && isOwner(request.resource.data.ownerId));
+      allow update: if isAdmin() || (isVendor() && isOwner(resource.data.ownerId));
+    }
+
+    match /products/{productId} {
+      allow read: if true;
+      allow write: if isAdmin() || isVendor(); // Simplified for now, should check ownership of vendor
+    }
+
+    match /services/{serviceId} {
+      allow read: if true;
+      allow write: if isAdmin() || isVendor();
+    }
+
+    match /workers/{workerId} {
+      allow read: if true;
+      allow write: if isAdmin() || isVendor();
+    }
+
+    match /delivery_partners/{partnerId} {
+      allow read: if true;
+      allow update: if isAdmin() || isDeliveryPartner();
+      allow create: if isAdmin();
+    }
+
+    match /drivers/{driverId} {
+      allow read: if true;
+      allow update: if isAdmin() || isDriver();
+      allow create: if isAdmin();
+    }
+
+    match /orders/{orderId} {
+      allow read: if isAuthenticated() && (isOwner(resource.data.userId) || isOwner(resource.data.vendorId) || isOwner(resource.data.deliveryPartnerId) || isAdmin());
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
+      allow update: if isAuthenticated() && (isOwner(resource.data.userId) || isOwner(resource.data.vendorId) || isOwner(resource.data.deliveryPartnerId) || isAdmin());
+    }
+
+    match /rides/{rideId} {
+      allow read: if isAuthenticated() && (isOwner(resource.data.userId) || isOwner(resource.data.driverId) || isAdmin());
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
+      allow update: if isAuthenticated() && (isOwner(resource.data.userId) || isOwner(resource.data.driverId) || isAdmin());
+    }
+
+    match /ride_tracking/{trackingId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && (isDriver() || isAdmin());
+    }
+
+    match /order_tracking/{trackingId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && (isDeliveryPartner() || isAdmin());
+    }
+
+    match /payments/{paymentId} {
+      allow read: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
+    }
+
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
+    }
+
+    match /support_tickets/{ticketId} {
+      allow read: if isAuthenticated() && (isOwner(resource.data.userId) || isAdmin());
+      allow create: if isAuthenticated() && isOwner(request.resource.data.userId);
+      allow update: if isAdmin();
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isAuthenticated() && isOwner(resource.data.userId);
+      allow update: if isAuthenticated() && isOwner(resource.data.userId) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead']);
+    }
+  }
+}
