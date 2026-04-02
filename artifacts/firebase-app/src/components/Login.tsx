@@ -98,6 +98,7 @@ export const Login: React.FC = () => {
     if (isCustomerCare) return '/admin/support';
     if (isAdmin) return '/admin/overview';
     if (profile?.role === 'service_worker') return '/worker/dashboard';
+    if (profile?.role === 'driver') return '/driver/dashboard';
     return '/';
   };
 
@@ -107,6 +108,7 @@ export const Login: React.FC = () => {
       else if (isCustomerCare) navigate('/admin/support');
       else if (isAdmin) navigate('/admin/overview');
       else if (profile?.role === 'service_worker') navigate('/worker/dashboard');
+      else if (profile?.role === 'driver') navigate('/driver/dashboard');
     }
   }, [user, isSuperAdmin, isCustomerCare, isAdmin, needsPhoneVerification, profile?.role]);
 
@@ -398,9 +400,22 @@ export const Login: React.FC = () => {
             }
           } : {}),
         };
+        if (role === 'driver') {
+          (newProfile as any).driverProfile = {
+            firstName: name.split(' ')[0] || name,
+            lastName: name.split(' ').slice(1).join(' ') || '',
+            experience: 0,
+            vehicleType: 'bike',
+            vehicleNumber: '',
+            rating: 5.0,
+            totalRides: 0,
+            isAvailable: true,
+          };
+        }
         await setDoc(doc(db, 'users', user.uid), newProfile);
         setSuccess('Account created successfully!');
-        setTimeout(() => navigate(role === 'service_worker' ? '/worker/dashboard' : getRedirectPath()), 2000);
+        const redirectTarget = role === 'service_worker' ? '/worker/dashboard' : role === 'driver' ? '/driver/dashboard' : getRedirectPath();
+        setTimeout(() => navigate(redirectTarget), 2000);
       }
     } catch (err: any) {
       setError(err.message);
@@ -636,6 +651,33 @@ export const Login: React.FC = () => {
                             </span>
                           </motion.div>
                         )}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Driver Info Banner */}
+                <AnimatePresence>
+                  {role === 'driver' && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.25 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="bg-blue-50 rounded-2xl p-4 border border-blue-100">
+                        <p className="text-sm font-bold text-blue-800 mb-2 flex items-center gap-2">
+                          🚗 Register as a Driver
+                        </p>
+                        <p className="text-xs text-blue-600">
+                          After signup, complete your driver profile — upload your license, vehicle RC card, and photo to start accepting rides.
+                        </p>
+                        <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+                          {['🏍️ Bike', '🛺 Auto', '🚗 Car'].map(v => (
+                            <div key={v} className="bg-white rounded-xl py-2 text-xs font-semibold text-blue-700 border border-blue-100">{v}</div>
+                          ))}
+                        </div>
                       </div>
                     </motion.div>
                   )}

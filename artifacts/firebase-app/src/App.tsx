@@ -10,6 +10,7 @@ import { FoodGrocery } from './components/FoodGrocery';
 import { RideHailing } from './components/RideHailing';
 import { HomeServices } from './components/HomeServices';
 import { ServiceWorkerDashboard } from './components/ServiceWorkerDashboard';
+import { DriverDashboard } from './components/DriverDashboard';
 import { Profile } from './components/Profile';
 import { AdminPanel } from './components/AdminPanel';
 import { OrderManagement } from "./components/admin/OrderManagement";
@@ -233,6 +234,9 @@ export default function App() {
 
             {/* ── Service Worker Dashboard ── */}
             <Route path="/worker/dashboard" element={<ProtectedRoute><ServiceWorkerDashboard /></ProtectedRoute>} />
+
+            {/* ── Driver Dashboard ── */}
+            <Route path="/driver/dashboard" element={<ProtectedRoute><DriverDashboard /></ProtectedRoute>} />
 
             {/* ── Main site ── */}
             <Route element={<MainLayout />}>

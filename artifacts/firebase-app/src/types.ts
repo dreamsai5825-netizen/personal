@@ -45,6 +45,7 @@ export interface UserProfile {
   status: 'active' | 'pending_verification' | 'pending_phone_verification' | 'suspended';
   walletBalance: number;
   serviceWorkerProfile?: ServiceWorkerProfile;
+  driverProfile?: DriverProfile;
 }
 
 export interface Address {
@@ -157,6 +158,54 @@ export interface Worker {
   isAvailable: boolean;
   currentLatitude: number;
   currentLongitude: number;
+}
+
+export interface DriverProfile {
+  firstName: string;
+  lastName: string;
+  experience: number;
+  vehicleType: 'bike' | 'auto' | 'car';
+  vehicleNumber: string;
+  licenseUrl?: string;
+  rcCardUrl?: string;
+  vehiclePhotoUrl?: string;
+  rating: number;
+  totalRides: number;
+  isAvailable: boolean;
+}
+
+export interface RideRequest {
+  requestId: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string;
+  pickupAddress: string;
+  pickupLat?: number;
+  pickupLng?: number;
+  dropAddress: string;
+  dropLat?: number;
+  dropLng?: number;
+  fare: number;
+  distance: number;
+  vehicleType: 'bike' | 'auto' | 'car';
+  status: 'broadcasting' | 'driver_assigned' | 'driver_arrived' | 'on_trip' | 'completed' | 'cancelled';
+  assignedDriverId?: string;
+  assignedDriverName?: string;
+  assignedDriverPhone?: string;
+  otp: string;
+  rejectedDriverIds: string[];
+  createdAt: string;
+  notes?: string;
+}
+
+export interface DriverTransaction {
+  txId: string;
+  driverId: string;
+  amount: number;
+  type: 'credit' | 'debit';
+  description: string;
+  rideId?: string;
+  createdAt: string;
 }
 
 export interface ServiceBookingRequest {
