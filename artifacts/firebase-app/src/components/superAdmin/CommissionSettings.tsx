@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, getDocs, setDoc, doc } from 'firebase/firestore';
+import { collection, onSnapshot, setDoc, doc } from 'firebase/firestore';
 import { db } from '../../firebase';
 import { Save, Percent, ChevronRight, Store, MapPin } from 'lucide-react';
 
@@ -11,6 +11,22 @@ interface CommissionRate {
   icon: string;
 }
 
+interface VendorCommission {
+  id: string; // Document ID (usually same as vendorId)
+  vendorId: string;
+  name: string;
+  type: string;
+  customRate: number;
+}
+
+interface CityCommission {
+  id: string; // Document ID (usually same as city name)
+  city: string;
+  food: number;
+  grocery: number;
+  ride: number;
+}
+
 const DEFAULT_COMMISSIONS: CommissionRate[] = [
   { id: 'food', service_type: 'food', label: 'Food Order Commission', percentage: 20, icon: '🍕' },
   { id: 'grocery', service_type: 'grocery', label: 'Grocery Order Commission', percentage: 15, icon: '🛒' },
@@ -18,48 +34,102 @@ const DEFAULT_COMMISSIONS: CommissionRate[] = [
   { id: 'service', service_type: 'service', label: 'Home Service Commission', percentage: 25, icon: '🔧' },
 ];
 
-const vendorCommissions = [
-  { vendorId: 'V001', name: "Raj's Kitchen", type: 'Food', customRate: 18 },
-  { vendorId: 'V002', name: 'Fresh Farms', type: 'Grocery', customRate: 12 },
-  { vendorId: 'V003', name: 'SpeedyBike', type: 'Ride', customRate: 15 },
-];
-
-const cityCommissions = [
-  { city: 'Bangalore', food: 20, grocery: 15, ride: 18 },
-  { city: 'Mumbai', food: 22, grocery: 17, ride: 20 },
-  { city: 'Delhi', food: 19, grocery: 14, ride: 17 },
-  { city: 'Chennai', food: 21, grocery: 16, ride: 19 },
-];
-
 export const CommissionSettings: React.FC = () => {
   const [commissions, setCommissions] = useState<CommissionRate[]>(DEFAULT_COMMISSIONS);
+  const [vendorCommissions, setVendorCommissions] = useState<VendorCommission[]>([]);
+  const [cityCommissions, setCityCommissions] = useState<CityCommission[]>([]);
+  
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [activeTab, setActiveTab] = useState<'global' | 'vendor' | 'city'>('global');
 
+  // Real-time listener for Global Commissions
   useEffect(() => {
-    const fetch = async () => {
-      try {
-        const snap = await getDocs(collection(db, 'commissions'));
-        if (snap.size > 0) {
-          const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as CommissionRate));
-          setCommissions(data);
-        }
-      } catch (e) {}
-    };
-    fetch();
+    const unsub = onSnapshot(collection(db, 'commissions'), (snap) => {
+      if (snap.size > 0) {
+        const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as CommissionRate));
+        setCommissions(data);
+      } else {
+        // Initialize default if empty
+        DEFAULT_COMMISSIONS.forEach(c => {
+          setDoc(doc(db, 'commissions', c.id), c).catch(console.error);
+        });
+      }
+    });
+    return () => unsub();
   }, []);
 
-  const handleChange = (id: string, value: number) => {
+  // Real-time listener for Vendor Commissions
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'vendor_commissions'), (snap) => {
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as VendorCommission));
+      setVendorCommissions(data);
+    });
+    return () => unsub();
+  }, []);
+
+  // Real-time listener for City Commissions
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'city_commissions'), (snap) => {
+      const data = snap.docs.map(d => ({ id: d.id, ...d.data() } as CityCommission));
+      setCityCommissions(data);
+    });
+    return () => unsub();
+  }, []);
+
+  const handleGlobalChange = (id: string, value: number) => {
     setCommissions(prev => prev.map(c => c.id === id ? { ...c, percentage: value } : c));
   };
 
-  const handleSave = async () => {
+  const handleVendorChange = (id: string, value: number) => {
+    setVendorCommissions(prev => prev.map(v => v.id === id ? { ...v, customRate: value } : v));
+  };
+
+  const handleCityChange = (id: string, field: 'food' | 'grocery' | 'ride', value: number) => {
+    setCityCommissions(prev => prev.map(c => c.id === id ? { ...c, [field]: value } : c));
+  };
+
+  const handleSaveGlobal = async () => {
     setSaving(true);
     try {
-      await Promise.all(commissions.map(c => setDoc(doc(db, 'commissions', c.id), { service_type: c.service_type, percentage: c.percentage, updated_at: new Date().toISOString() })));
-    } catch (e) {}
+      await Promise.all(commissions.map(c => 
+        setDoc(doc(db, 'commissions', c.id), { 
+          ...c, 
+          updated_at: new Date().toISOString() 
+        }, { merge: true })
+      ));
+    } catch (e) {
+      console.error("Error saving global commissions:", e);
+    }
     setSaving(false);
+    showSavedIndicator();
+  };
+
+  const handleSaveVendor = async (vendor: VendorCommission) => {
+    try {
+      await setDoc(doc(db, 'vendor_commissions', vendor.id), {
+        ...vendor,
+        updated_at: new Date().toISOString()
+      }, { merge: true });
+      showSavedIndicator();
+    } catch (e) {
+      console.error("Error saving vendor commission:", e);
+    }
+  };
+
+  const handleSaveCity = async (cityItem: CityCommission) => {
+    try {
+      await setDoc(doc(db, 'city_commissions', cityItem.id), {
+        ...cityItem,
+        updated_at: new Date().toISOString()
+      }, { merge: true });
+      showSavedIndicator();
+    } catch (e) {
+      console.error("Error saving city commission:", e);
+    }
+  };
+
+  const showSavedIndicator = () => {
     setSaved(true);
     setTimeout(() => setSaved(false), 3000);
   };
@@ -112,7 +182,7 @@ export const CommissionSettings: React.FC = () => {
                     min={0}
                     max={50}
                     value={c.percentage}
-                    onChange={e => handleChange(c.id, Number(e.target.value))}
+                    onChange={e => handleGlobalChange(c.id, Number(e.target.value))}
                     className="w-full accent-orange-500"
                   />
                   <div className="flex items-center gap-2 mt-3">
@@ -121,7 +191,7 @@ export const CommissionSettings: React.FC = () => {
                       min={0}
                       max={100}
                       value={c.percentage}
-                      onChange={e => handleChange(c.id, Number(e.target.value))}
+                      onChange={e => handleGlobalChange(c.id, Number(e.target.value))}
                       className="w-20 bg-gray-800 border border-gray-700 text-white px-3 py-1.5 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 text-center"
                     />
                     <span className="text-gray-400 text-sm">% commission</span>
@@ -132,7 +202,7 @@ export const CommissionSettings: React.FC = () => {
           </div>
 
           <button
-            onClick={handleSave}
+            onClick={handleSaveGlobal}
             disabled={saving}
             className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-60 text-white px-6 py-2.5 rounded-lg text-sm font-medium transition-colors"
           >
@@ -158,18 +228,26 @@ export const CommissionSettings: React.FC = () => {
             </thead>
             <tbody>
               {vendorCommissions.map(v => (
-                <tr key={v.vendorId} className="border-b border-gray-800 hover:bg-gray-800/30 transition-colors">
+                <tr key={v.id} className="border-b border-gray-800 hover:bg-gray-800/30 transition-colors">
                   <td className="px-5 py-3 text-gray-500 text-sm font-mono">{v.vendorId}</td>
                   <td className="px-5 py-3 text-white text-sm">{v.name}</td>
                   <td className="px-5 py-3 text-gray-300 text-sm">{v.type}</td>
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-1">
-                      <input type="number" defaultValue={v.customRate} className="w-16 bg-gray-800 border border-gray-700 text-white px-2 py-1 rounded text-sm text-center focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                      <input 
+                        type="number" 
+                        value={v.customRate} 
+                        onChange={(e) => handleVendorChange(v.id, Number(e.target.value))}
+                        className="w-16 bg-gray-800 border border-gray-700 text-white px-2 py-1 rounded text-sm text-center focus:outline-none focus:ring-2 focus:ring-orange-500" 
+                      />
                       <span className="text-gray-400 text-sm">%</span>
                     </div>
                   </td>
                   <td className="px-5 py-3">
-                    <button className="text-orange-400 hover:text-orange-300 text-xs font-medium flex items-center gap-1">
+                    <button 
+                      onClick={() => handleSaveVendor(v)}
+                      className="text-orange-400 hover:text-orange-300 text-xs font-medium flex items-center gap-1"
+                    >
                       Save <ChevronRight className="w-3 h-3" />
                     </button>
                   </td>
@@ -196,18 +274,26 @@ export const CommissionSettings: React.FC = () => {
             </thead>
             <tbody>
               {cityCommissions.map(c => (
-                <tr key={c.city} className="border-b border-gray-800 hover:bg-gray-800/30 transition-colors">
+                <tr key={c.id} className="border-b border-gray-800 hover:bg-gray-800/30 transition-colors">
                   <td className="px-5 py-3 text-white text-sm font-medium">{c.city}</td>
-                  {['food', 'grocery', 'ride'].map(t => (
+                  {(['food', 'grocery', 'ride'] as const).map(t => (
                     <td key={t} className="px-5 py-3">
                       <div className="flex items-center gap-1">
-                        <input type="number" defaultValue={(c as any)[t]} className="w-14 bg-gray-800 border border-gray-700 text-white px-2 py-1 rounded text-sm text-center focus:outline-none focus:ring-2 focus:ring-orange-500" />
+                        <input 
+                          type="number" 
+                          value={c[t]} 
+                          onChange={(e) => handleCityChange(c.id, t, Number(e.target.value))}
+                          className="w-14 bg-gray-800 border border-gray-700 text-white px-2 py-1 rounded text-sm text-center focus:outline-none focus:ring-2 focus:ring-orange-500" 
+                        />
                         <span className="text-gray-400 text-sm">%</span>
                       </div>
                     </td>
                   ))}
                   <td className="px-5 py-3">
-                    <button className="text-orange-400 hover:text-orange-300 text-xs font-medium flex items-center gap-1">
+                    <button 
+                      onClick={() => handleSaveCity(c)}
+                      className="text-orange-400 hover:text-orange-300 text-xs font-medium flex items-center gap-1"
+                    >
                       Save <ChevronRight className="w-3 h-3" />
                     </button>
                   </td>

@@ -12,7 +12,7 @@ import {
 } from 'firebase/auth';
 import { auth, db } from '../firebase';
 import { doc, setDoc, getDoc, updateDoc } from 'firebase/firestore';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 import { Mail, Lock, Chrome, ArrowRight, User as UserIcon, Phone, Eye, EyeOff, CheckCircle, AlertCircle, Wrench, Zap, Droplets, Wind, Car, Sparkles, ChevronRight } from 'lucide-react';
 import { UserProfile, ServiceWorkerCategory } from '../types';
@@ -70,6 +70,7 @@ export const Login: React.FC = () => {
   const [debugPhoneNumber, setDebugPhoneNumber] = useState('');
   const [debugVerificationState, setDebugVerificationState] = useState('');
   const navigate = useNavigate();
+  const location = useLocation();
 
   const resetOtpState = () => {
     setShowOtp(false);
@@ -94,6 +95,9 @@ export const Login: React.FC = () => {
   const { user, needsPhoneVerification, profile, isSuperAdmin, isCustomerCare, isAdmin } = useAuth();
 
   const getRedirectPath = () => {
+    const state = location.state as { returnTo?: string };
+    if (state?.returnTo) return state.returnTo;
+    
     if (isSuperAdmin) return '/admin/super';
     if (isCustomerCare) return '/admin/support';
     if (isAdmin) return '/admin/overview';
@@ -104,13 +108,15 @@ export const Login: React.FC = () => {
 
   useEffect(() => {
     if (user && !needsPhoneVerification) {
-      if (isSuperAdmin) navigate('/admin/super');
+      const state = location.state as { returnTo?: string };
+      if (state?.returnTo) navigate(state.returnTo);
+      else if (isSuperAdmin) navigate('/admin/super');
       else if (isCustomerCare) navigate('/admin/support');
       else if (isAdmin) navigate('/admin/overview');
       else if (profile?.role === 'service_worker') navigate('/worker/dashboard');
       else if (profile?.role === 'driver') navigate('/driver/dashboard');
     }
-  }, [user, isSuperAdmin, isCustomerCare, isAdmin, needsPhoneVerification, profile?.role]);
+  }, [user, isSuperAdmin, isCustomerCare, isAdmin, needsPhoneVerification, profile?.role, location.state]);
 
   useEffect(() => {
     if (user && needsPhoneVerification) {

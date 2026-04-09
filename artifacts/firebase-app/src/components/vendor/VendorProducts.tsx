@@ -1,5 +1,8 @@
-import React, { useState } from 'react';
-import { Search, Plus, Edit2, Trash2, ToggleLeft, ToggleRight, ChevronDown, X, Package } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Search, Plus, Edit2, Trash2, ToggleLeft, ToggleRight, ChevronDown, X, Package, Upload } from 'lucide-react';
+import { collection, onSnapshot, doc, setDoc, deleteDoc, updateDoc, query, where } from 'firebase/firestore';
+import { db } from '../../firebase';
+import { useAuth } from '../../AuthContext';
 
 interface Product {
   id: string;
@@ -9,18 +12,11 @@ interface Product {
   stock: number;
   status: 'Available' | 'Out of Stock' | 'Disabled';
   description: string;
+  image?: string;
+  vendorId?: string;
 }
 
-const initialProducts: Product[] = [
-  { id: 'P001', name: 'Chicken Burger', category: 'Fast Food', price: 199, stock: 50, status: 'Available', description: 'Crispy fried chicken with lettuce and mayo' },
-  { id: 'P002', name: 'Margherita Pizza', category: 'Pizza', price: 299, stock: 30, status: 'Available', description: 'Classic tomato sauce with mozzarella cheese' },
-  { id: 'P003', name: 'Chicken Biryani', category: 'Rice', price: 299, stock: 20, status: 'Available', description: 'Aromatic basmati rice with tender chicken' },
-  { id: 'P004', name: 'Caesar Salad', category: 'Salads', price: 180, stock: 15, status: 'Available', description: 'Fresh romaine lettuce with Caesar dressing' },
-  { id: 'P005', name: 'Paneer Wrap', category: 'Wraps', price: 159, stock: 0, status: 'Out of Stock', description: 'Grilled paneer with veggies in a whole wheat wrap' },
-  { id: 'P006', name: 'Veg Burger', category: 'Fast Food', price: 149, stock: 40, status: 'Available', description: 'Crispy veg patty with fresh veggies' },
-  { id: 'P007', name: 'Cold Coffee', category: 'Beverages', price: 120, stock: 100, status: 'Available', description: 'Chilled coffee with ice cream' },
-  { id: 'P008', name: 'Mango Lassi', category: 'Beverages', price: 99, stock: 60, status: 'Disabled', description: 'Refreshing mango yogurt drink' },
-];
+const initialProducts: Product[] = [];
 
 const categories = ['All', 'Fast Food', 'Pizza', 'Rice', 'Salads', 'Wraps', 'Beverages'];
 
@@ -31,22 +27,55 @@ const statusBadge: Record<string, string> = {
 };
 
 const ProductModal: React.FC<{ product: Product | null; onClose: () => void; onSave: (p: Product) => void }> = ({ product, onClose, onSave }) => {
-  const [form, setForm] = useState<Product>(product || { id: `P${Date.now()}`, name: '', category: 'Fast Food', price: 0, stock: 0, status: 'Available', description: '' });
+  const [form, setForm] = useState<Product>(product || { id: `P${Date.now()}`, name: '', category: 'Fast Food', price: 0, stock: 0, status: 'Available', description: '', image: '' });
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setForm(f => ({ ...f, image: reader.result as string }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const isFormValid = form.name && form.price > 0 && form.image;
 
   return (
     <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
-      <div className="bg-emerald-900 border border-emerald-700 rounded-2xl w-full max-w-md">
-        <div className="flex items-center justify-between p-5 border-b border-emerald-800">
+      <div className="bg-emerald-900 border border-emerald-700 rounded-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between p-5 border-b border-emerald-800 sticky top-0 bg-emerald-900 z-10">
           <h2 className="text-white font-bold text-lg">{product ? 'Edit Product' : 'Add New Product'}</h2>
           <button onClick={onClose} className="text-emerald-400 hover:text-white"><X className="w-5 h-5" /></button>
         </div>
         <div className="p-5 space-y-4">
+          
+          <div className="flex flex-col items-center justify-center mb-4">
+            <div 
+              className="w-24 h-24 rounded-xl border-2 border-dashed border-emerald-600 bg-emerald-800/50 flex flex-col items-center justify-center cursor-pointer overflow-hidden relative"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              {form.image ? (
+                <img src={form.image} alt="Product" className="w-full h-full object-cover" />
+              ) : (
+                <>
+                  <Upload className="w-6 h-6 text-emerald-400 mb-1" />
+                  <span className="text-emerald-500 text-[10px] font-medium uppercase tracking-wider">Upload</span>
+                </>
+              )}
+            </div>
+            {!form.image && <p className="text-red-400 text-xs mt-2">* Product image is required</p>}
+            <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleImageUpload} />
+          </div>
+
           <div>
             <label className="text-emerald-400 text-xs mb-1 block">Product Name</label>
             <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
               className="w-full bg-emerald-800 border border-emerald-700 text-white text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500" placeholder="e.g. Chicken Burger" />
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-emerald-400 text-xs mb-1 block">Category</label>
               <select value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
@@ -60,7 +89,7 @@ const ProductModal: React.FC<{ product: Product | null; onClose: () => void; onS
                 className="w-full bg-emerald-800 border border-emerald-700 text-white text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-emerald-400 text-xs mb-1 block">Stock</label>
               <input type="number" value={form.stock} onChange={e => setForm(f => ({ ...f, stock: Number(e.target.value) }))}
@@ -81,7 +110,11 @@ const ProductModal: React.FC<{ product: Product | null; onClose: () => void; onS
           </div>
           <div className="flex gap-3">
             <button onClick={onClose} className="flex-1 py-2.5 bg-emerald-800 hover:bg-emerald-700 text-emerald-300 rounded-xl text-sm transition-colors">Cancel</button>
-            <button onClick={() => { onSave(form); onClose(); }} className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold rounded-xl text-sm transition-colors">
+            <button 
+              onClick={() => { onSave(form); onClose(); }} 
+              disabled={!isFormValid}
+              className="flex-1 py-2.5 bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-xl text-sm transition-colors"
+            >
               {product ? 'Save Changes' : 'Add Product'}
             </button>
           </div>
@@ -92,10 +125,21 @@ const ProductModal: React.FC<{ product: Product | null; onClose: () => void; onS
 };
 
 export const VendorProducts: React.FC = () => {
-  const [products, setProducts] = useState(initialProducts);
+  const { user } = useAuth();
+  const [products, setProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState('');
   const [catFilter, setCatFilter] = useState('All');
   const [modal, setModal] = useState<{ open: boolean; product: Product | null }>({ open: false, product: null });
+
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, 'products'), where('vendorId', '==', user.uid));
+    const unsub = onSnapshot(q, (snap) => {
+      const liveProducts = snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Product));
+      setProducts(liveProducts);
+    });
+    return unsub;
+  }, [user]);
 
   const filtered = products.filter(p => {
     const matchSearch = p.name.toLowerCase().includes(search.toLowerCase());
@@ -103,16 +147,38 @@ export const VendorProducts: React.FC = () => {
     return matchSearch && matchCat;
   });
 
-  const saveProduct = (p: Product) => {
-    setProducts(prev => prev.find(x => x.id === p.id) ? prev.map(x => x.id === p.id ? p : x) : [...prev, p]);
+  const saveProduct = async (p: Product) => {
+    if (!user) return;
+    try {
+      const prodToSave = { ...p, vendorId: user.uid };
+      await setDoc(doc(db, 'products', p.id), prodToSave);
+    } catch (e) {
+      console.error(e);
+      // Fallback optimistic update
+      const prodToSave = { ...p, vendorId: user.uid };
+      setProducts(prev => prev.find(x => x.id === p.id) ? prev.map(x => x.id === p.id ? prodToSave : x) : [...prev, prodToSave]);
+    }
   };
 
-  const toggleStatus = (id: string) => {
-    setProducts(prev => prev.map(p => p.id === id ? { ...p, status: p.status === 'Available' ? 'Disabled' : 'Available' } : p));
+  const toggleStatus = async (id: string) => {
+    const p = products.find(x => x.id === id);
+    if (!p) return;
+    const newStatus = p.status === 'Available' ? 'Disabled' : 'Available';
+    try {
+      await updateDoc(doc(db, 'products', id), { status: newStatus });
+    } catch (e) {
+      console.error(e);
+      setProducts(prev => prev.map(x => x.id === id ? { ...x, status: newStatus } : x));
+    }
   };
 
-  const deleteProduct = (id: string) => {
-    setProducts(prev => prev.filter(p => p.id !== id));
+  const deleteProduct = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, 'products', id));
+    } catch (e) {
+      console.error(e);
+      setProducts(prev => prev.filter(p => p.id !== id));
+    }
   };
 
   return (
@@ -128,7 +194,7 @@ export const VendorProducts: React.FC = () => {
         </button>
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {[
           { label: 'Total Products', value: products.length, color: 'text-emerald-400' },
           { label: 'Available', value: products.filter(p => p.status === 'Available').length, color: 'text-green-400' },
@@ -174,8 +240,12 @@ export const VendorProducts: React.FC = () => {
                 <tr key={p.id} className="hover:bg-emerald-800/40 transition-colors">
                   <td className="px-5 py-3.5">
                     <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 bg-emerald-800 rounded-xl flex items-center justify-center flex-shrink-0">
-                        <Package className="w-4 h-4 text-emerald-400" />
+                      <div className="w-9 h-9 bg-emerald-800 rounded-xl flex items-center justify-center flex-shrink-0 overflow-hidden">
+                        {p.image ? (
+                          <img src={p.image} alt={p.name} className="w-full h-full object-cover" />
+                        ) : (
+                          <Package className="w-4 h-4 text-emerald-400" />
+                        )}
                       </div>
                       <div>
                         <p className="text-white font-medium">{p.name}</p>

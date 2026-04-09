@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { collection, doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { Save, ChevronDown, ChevronUp, Zap } from 'lucide-react';
+import { db } from '../../firebase';
 
 interface ServiceConfig {
   id: string;
@@ -10,6 +12,7 @@ interface ServiceConfig {
   deliveryFee: number;
   surgeEnabled: boolean;
   surgeMultiplier: number;
+  updatedAt?: string;
 }
 
 const DEFAULT_SERVICES: ServiceConfig[] = [
@@ -20,18 +23,106 @@ const DEFAULT_SERVICES: ServiceConfig[] = [
   { id: 'auto_taxi', name: 'Auto Taxi', icon: '🛺', enabled: true, minOrder: 0, deliveryFee: 0, surgeEnabled: false, surgeMultiplier: 1.4 },
 ];
 
+const normalizeService = (service: Partial<ServiceConfig> & { id: string }): ServiceConfig => {
+  const fallback = DEFAULT_SERVICES.find((item) => item.id === service.id);
+  return {
+    id: service.id,
+    name: service.name ?? fallback?.name ?? service.id,
+    icon: service.icon ?? fallback?.icon ?? '⚙️',
+    enabled: Boolean(service.enabled ?? fallback?.enabled),
+    minOrder: Number(service.minOrder ?? fallback?.minOrder ?? 0),
+    deliveryFee: Number(service.deliveryFee ?? fallback?.deliveryFee ?? 0),
+    surgeEnabled: Boolean(service.surgeEnabled ?? fallback?.surgeEnabled),
+    surgeMultiplier: Number(service.surgeMultiplier ?? fallback?.surgeMultiplier ?? 1),
+    updatedAt: service.updatedAt,
+  };
+};
+
 export const ServiceConfiguration: React.FC = () => {
   const [services, setServices] = useState<ServiceConfig[]>(DEFAULT_SERVICES);
   const [expanded, setExpanded] = useState<string | null>('food');
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const seededDefaultsRef = useRef(false);
 
-  const update = (id: string, field: keyof ServiceConfig, value: any) => {
-    setServices(prev => prev.map(s => s.id === id ? { ...s, [field]: value } : s));
+  useEffect(() => {
+    const unsubscribe = onSnapshot(
+      collection(db, 'serviceConfigurations'),
+      async (snapshot) => {
+        try {
+          if (snapshot.empty && !seededDefaultsRef.current) {
+            seededDefaultsRef.current = true;
+            await Promise.all(
+              DEFAULT_SERVICES.map((service) =>
+                setDoc(doc(db, 'serviceConfigurations', service.id), {
+                  ...service,
+                  updatedAt: new Date().toISOString(),
+                }),
+              ),
+            );
+            return;
+          }
+
+          const liveServices = snapshot.docs.map((item) =>
+            normalizeService({ id: item.id, ...(item.data() as Partial<ServiceConfig>) }),
+          );
+          const merged = DEFAULT_SERVICES.map((service) => {
+            const live = liveServices.find((item) => item.id === service.id);
+            return live ?? service;
+          });
+
+          setServices(merged);
+          setError(null);
+          setLoading(false);
+          setHasUnsavedChanges(false);
+        } catch (snapshotError) {
+          console.error('Failed to process service configuration snapshot:', snapshotError);
+          setError('Unable to load service configuration data.');
+          setLoading(false);
+        }
+      },
+      (snapshotError) => {
+        console.error('Service configuration realtime listener failed:', snapshotError);
+        setError('Realtime updates could not be started for service configuration.');
+        setLoading(false);
+      },
+    );
+
+    return () => unsubscribe();
+  }, []);
+
+  const update = (id: string, field: keyof ServiceConfig, value: string | number | boolean) => {
+    setServices((prev) =>
+      prev.map((service) => (service.id === id ? { ...service, [field]: value } : service)),
+    );
+    setHasUnsavedChanges(true);
+    setSaved(false);
   };
 
-  const handleSave = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await Promise.all(
+        services.map((service) =>
+          setDoc(doc(db, 'serviceConfigurations', service.id), {
+            ...service,
+            updatedAt: new Date().toISOString(),
+          }),
+        ),
+      );
+      setSaved(true);
+      setHasUnsavedChanges(false);
+      setTimeout(() => setSaved(false), 3000);
+    } catch (saveError) {
+      console.error('Failed to save service configuration:', saveError);
+      setError('Saving service configuration failed. Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -43,17 +134,29 @@ export const ServiceConfiguration: React.FC = () => {
         </div>
         <button
           onClick={handleSave}
-          className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          disabled={saving || loading || !hasUnsavedChanges}
+          className="flex items-center gap-2 bg-orange-500 hover:bg-orange-600 disabled:opacity-60 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
         >
           <Save className="w-4 h-4" />
-          {saved ? 'Saved!' : 'Save All'}
+          {saving ? 'Saving...' : saved ? 'Saved!' : 'Save All'}
         </button>
       </div>
 
+      {error && (
+        <div className="mb-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+          {error}
+        </div>
+      )}
+
+      {loading && (
+        <div className="mb-4 rounded-xl border border-gray-800 bg-gray-900 px-4 py-3 text-sm text-gray-400">
+          Loading live service configuration...
+        </div>
+      )}
+
       <div className="space-y-3">
-        {services.map(service => (
+        {services.map((service) => (
           <div key={service.id} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-            {/* Header */}
             <div
               className="flex items-center justify-between px-5 py-4 cursor-pointer hover:bg-gray-800/30 transition-colors"
               onClick={() => setExpanded(expanded === service.id ? null : service.id)}
@@ -63,14 +166,16 @@ export const ServiceConfiguration: React.FC = () => {
                 <div>
                   <p className="text-white font-medium">{service.name}</p>
                   <p className="text-gray-500 text-xs mt-0.5">
-                    Min order: ₹{service.minOrder} · Delivery: {service.deliveryFee > 0 ? `₹${service.deliveryFee}` : 'Free'} · Surge: {service.surgeEnabled ? `${service.surgeMultiplier}x` : 'Off'}
+                    Min order: Rs {service.minOrder} | Delivery: {service.deliveryFee > 0 ? `Rs ${service.deliveryFee}` : 'Free'} | Surge: {service.surgeEnabled ? `${service.surgeMultiplier}x` : 'Off'}
                   </p>
                 </div>
               </div>
               <div className="flex items-center gap-4">
-                {/* Toggle */}
                 <button
-                  onClick={e => { e.stopPropagation(); update(service.id, 'enabled', !service.enabled); }}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    update(service.id, 'enabled', !service.enabled);
+                  }}
                   className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${service.enabled ? 'bg-orange-500' : 'bg-gray-700'}`}
                 >
                   <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${service.enabled ? 'translate-x-6' : 'translate-x-1'}`} />
@@ -82,25 +187,26 @@ export const ServiceConfiguration: React.FC = () => {
               </div>
             </div>
 
-            {/* Expanded Settings */}
             {expanded === service.id && (
               <div className="px-5 pb-5 border-t border-gray-800 pt-4">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div>
-                    <label className="text-gray-400 text-xs font-medium block mb-1.5">Minimum Order Value (₹)</label>
+                    <label className="text-gray-400 text-xs font-medium block mb-1.5">Minimum Order Value (Rs)</label>
                     <input
                       type="number"
+                      min={0}
                       value={service.minOrder}
-                      onChange={e => update(service.id, 'minOrder', Number(e.target.value))}
+                      onChange={(event) => update(service.id, 'minOrder', Number(event.target.value))}
                       className="w-full bg-gray-800 border border-gray-700 text-white px-3 py-2 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                     />
                   </div>
                   <div>
-                    <label className="text-gray-400 text-xs font-medium block mb-1.5">Delivery Fee (₹)</label>
+                    <label className="text-gray-400 text-xs font-medium block mb-1.5">Delivery Fee (Rs)</label>
                     <input
                       type="number"
+                      min={0}
                       value={service.deliveryFee}
-                      onChange={e => update(service.id, 'deliveryFee', Number(e.target.value))}
+                      onChange={(event) => update(service.id, 'deliveryFee', Number(event.target.value))}
                       className="w-full bg-gray-800 border border-gray-700 text-white px-3 py-2 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                     />
                   </div>
@@ -112,7 +218,7 @@ export const ServiceConfiguration: React.FC = () => {
                       min={1}
                       max={5}
                       value={service.surgeMultiplier}
-                      onChange={e => update(service.id, 'surgeMultiplier', Number(e.target.value))}
+                      onChange={(event) => update(service.id, 'surgeMultiplier', Number(event.target.value))}
                       className="w-full bg-gray-800 border border-gray-700 text-white px-3 py-2 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
                     />
                   </div>
@@ -132,6 +238,11 @@ export const ServiceConfiguration: React.FC = () => {
                     </span>
                   </div>
                 </div>
+                {service.updatedAt && (
+                  <p className="mt-4 text-xs text-gray-500">
+                    Last updated: {new Date(service.updatedAt).toLocaleString('en-IN')}
+                  </p>
+                )}
               </div>
             )}
           </div>

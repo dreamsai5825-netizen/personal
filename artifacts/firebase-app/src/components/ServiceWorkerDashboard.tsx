@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { ServiceBookingRequest, ServiceWorkerCategory } from '../types';
 import { cn } from '../lib/utils';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { auth } from '../firebase';
 
@@ -31,11 +31,18 @@ const CATEGORY_META: Record<ServiceWorkerCategory, { label: string; icon: React.
 
 type Tab = 'incoming' | 'active' | 'history';
 
+const isServiceWorkerTab = (value: string | null): value is Tab =>
+  value === 'incoming' || value === 'active' || value === 'history';
+
 export const ServiceWorkerDashboard: React.FC = () => {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [isAvailable, setIsAvailable] = useState(profile?.serviceWorkerProfile?.isAvailable ?? true);
-  const [tab, setTab] = useState<Tab>('incoming');
+  const [tab, setTab] = useState<Tab>(() => {
+    const requestedTab = searchParams.get('tab');
+    return isServiceWorkerTab(requestedTab) ? requestedTab : 'incoming';
+  });
   const [incomingRequests, setIncomingRequests] = useState<ServiceBookingRequest[]>([]);
   const [activeJobs, setActiveJobs] = useState<ServiceBookingRequest[]>([]);
   const [historyJobs, setHistoryJobs] = useState<ServiceBookingRequest[]>([]);
@@ -45,6 +52,18 @@ export const ServiceWorkerDashboard: React.FC = () => {
   const category = profile?.serviceWorkerProfile?.category;
   const meta = category ? CATEGORY_META[category] : null;
   const Icon = meta?.icon ?? Wrench;
+
+  useEffect(() => {
+    const requestedTab = searchParams.get('tab');
+    if (isServiceWorkerTab(requestedTab) && requestedTab !== tab) {
+      setTab(requestedTab);
+    }
+  }, [searchParams, tab]);
+
+  const handleTabChange = (nextTab: Tab) => {
+    setTab(nextTab);
+    setSearchParams({ tab: nextTab }, { replace: true });
+  };
 
   useEffect(() => {
     if (profile?.serviceWorkerProfile?.isAvailable !== undefined) {
@@ -257,7 +276,7 @@ export const ServiceWorkerDashboard: React.FC = () => {
           ] as { key: Tab; label: string; count: number | null }[]).map(({ key, label, count }) => (
             <button
               key={key}
-              onClick={() => setTab(key)}
+              onClick={() => handleTabChange(key)}
               className={cn(
                 'flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-1.5',
                 tab === key ? 'bg-white text-orange-600 shadow-sm' : 'text-gray-500'

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Bell, CheckCircle, XCircle, Package, Clock, MapPin, User, AlertCircle } from 'lucide-react';
-import { foodOrderStore as orderStore, VendorOrder, statusBadge, VendorOrderStatus } from '../../lib/vendorOrderStore';
+import { foodOrderStore, groceryOrderStore, VendorOrder, statusBadge, VendorOrderStatus } from '../../lib/vendorOrderStore';
 import { useAuth } from '../../AuthContext';
 
 const RejectionReasonModal: React.FC<{
@@ -91,24 +91,25 @@ export const VendorNotifications: React.FC = () => {
   const [filter, setFilter] = useState<'all' | 'new' | 'actioned'>('all');
 
   const isGrocery = profile?.role === 'grocery_store_vendor';
+  const activeStore = isGrocery ? groceryOrderStore : foodOrderStore;
 
   useEffect(() => {
-    setOrders(orderStore.getOrders().filter(o => isGrocery ? o.vendorType === 'grocery' : o.vendorType === 'food'));
-    const unsub = orderStore.subscribe(() => {
-      setOrders(orderStore.getOrders().filter(o => isGrocery ? o.vendorType === 'grocery' : o.vendorType === 'food'));
+    setOrders(activeStore.getOrders());
+    const unsub = activeStore.subscribe(() => {
+      setOrders(activeStore.getOrders());
     });
     return unsub;
-  }, [isGrocery]);
+  }, [isGrocery, activeStore]);
 
   const handleAccept = (order: VendorOrder) => {
-    orderStore.updateStatus(order.id, 'Accepted');
-    orderStore.markNotified(order.id);
+    activeStore.updateStatus(order.id, 'Accepted');
+    activeStore.markNotified(order.id);
   };
 
   const handleRejectConfirm = (reason: string) => {
     if (!rejectTarget) return;
-    orderStore.updateStatus(rejectTarget.id, 'Rejected', reason);
-    orderStore.markNotified(rejectTarget.id);
+    activeStore.updateStatus(rejectTarget.id, 'Rejected', reason);
+    activeStore.markNotified(rejectTarget.id);
     setRejectTarget(null);
   };
 
@@ -149,7 +150,7 @@ export const VendorNotifications: React.FC = () => {
         )}
       </div>
 
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="bg-blue-500/10 border border-blue-500/20 rounded-xl p-4 text-center">
           <p className="text-blue-400 text-2xl font-bold">{newCount}</p>
           <p className="text-emerald-400 text-xs mt-0.5">Pending Action</p>
@@ -164,7 +165,7 @@ export const VendorNotifications: React.FC = () => {
         </div>
       </div>
 
-      <div className="flex gap-2">
+      <div className="flex gap-2 overflow-x-auto pb-1">
         {(['all', 'new', 'actioned'] as const).map(f => (
           <button
             key={f}

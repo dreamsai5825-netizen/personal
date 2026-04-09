@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { collection, getDocs, addDoc, updateDoc, deleteDoc, doc } from 'firebase/firestore';
-import { db } from '../../firebase';
+import { collection, onSnapshot, addDoc, updateDoc, deleteDoc, doc, setDoc, query, where } from 'firebase/firestore';
+import { db, app } from '../../firebase';
+import { initializeApp } from 'firebase/app';
+import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
 import { Plus, Edit2, Trash2, Ban, Search, X, ChevronDown } from 'lucide-react';
 
-type AdminRole = 'super_admin' | 'system_admin' | 'platform_owner' | 'operations_admin' | 'customer_care_admin' | 'verification_admin' | 'finance_admin';
+type AdminRole = 'super admin' | 'admin' | 'customerCare';
 type AdminStatus = 'active' | 'disabled';
 
 interface AdminRecord {
@@ -15,94 +17,132 @@ interface AdminRecord {
   createdAt: string;
 }
 
-const ROLES: AdminRole[] = ['super_admin', 'system_admin', 'platform_owner', 'operations_admin', 'customer_care_admin', 'verification_admin', 'finance_admin'];
+const ROLES: AdminRole[] = ['super admin', 'admin', 'customerCare'];
 
-const roleLabel = (r: AdminRole) => r.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+const roleLabel = (r: AdminRole) => {
+  if (r === 'admin') return 'Operational Admin';
+  if (r === 'super admin') return 'Super Admin';
+  if (r === 'customerCare') return 'Customer Care';
+  return r;
+};
 
 const roleBadge = (role: AdminRole) => {
   const map: Record<AdminRole, string> = {
-    super_admin: 'bg-red-500/20 text-red-400',
-    system_admin: 'bg-orange-500/20 text-orange-400',
-    platform_owner: 'bg-purple-500/20 text-purple-400',
-    operations_admin: 'bg-blue-500/20 text-blue-400',
-    customer_care_admin: 'bg-cyan-500/20 text-cyan-400',
-    verification_admin: 'bg-yellow-500/20 text-yellow-400',
-    finance_admin: 'bg-green-500/20 text-green-400',
+    'super admin': 'bg-red-500/20 text-red-400',
+    'admin': 'bg-blue-500/20 text-blue-400',
+    'customerCare': 'bg-cyan-500/20 text-cyan-400',
   };
   return map[role] || 'bg-gray-500/20 text-gray-400';
 };
 
-const DEMO_ADMINS: AdminRecord[] = [
-  { id: '1', name: 'Rahul Sharma', email: 'rahul@omni.com', role: 'super_admin', status: 'active', createdAt: '2024-01-10' },
-  { id: '2', name: 'Priya Singh', email: 'priya@omni.com', role: 'operations_admin', status: 'active', createdAt: '2024-02-15' },
-  { id: '3', name: 'Amit Kumar', email: 'amit@omni.com', role: 'finance_admin', status: 'active', createdAt: '2024-03-20' },
-  { id: '4', name: 'Sneha Patel', email: 'sneha@omni.com', role: 'customer_care_admin', status: 'disabled', createdAt: '2024-04-05' },
-  { id: '5', name: 'Vikram Nair', email: 'vikram@omni.com', role: 'verification_admin', status: 'active', createdAt: '2024-05-12' },
-];
-
-const emptyForm = { name: '', email: '', role: 'operations_admin' as AdminRole, status: 'active' as AdminStatus };
+const emptyForm = { name: '', email: '', password: '', role: 'admin' as AdminRole, status: 'active' as AdminStatus };
 
 export const AdminManagement: React.FC = () => {
-  const [admins, setAdmins] = useState<AdminRecord[]>(DEMO_ADMINS);
+  const [admins, setAdmins] = useState<AdminRecord[]>([]);
   const [search, setSearch] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<AdminRecord | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchAdmins = async () => {
-      try {
-        const snap = await getDocs(collection(db, 'admins'));
-        if (snap.size > 0) {
-          setAdmins(snap.docs.map(d => ({ id: d.id, ...d.data() } as AdminRecord)));
-        }
-      } catch (e) {}
-    };
-    fetchAdmins();
+    const q = query(collection(db, 'users'), where('role', 'in', ROLES));
+    const unsubscribe = onSnapshot(q, (snap) => {
+      setAdmins(snap.docs.map(d => ({ id: d.id, ...d.data() } as AdminRecord)));
+    }, (error) => {
+      console.error("Error fetching admins:", error);
+    });
+
+    return () => unsubscribe();
   }, []);
 
   const openCreate = () => {
     setEditTarget(null);
     setForm(emptyForm);
+    setErrorMsg(null);
     setModalOpen(true);
   };
 
   const openEdit = (admin: AdminRecord) => {
     setEditTarget(admin);
-    setForm({ name: admin.name, email: admin.email, role: admin.role, status: admin.status });
+    setForm({ name: admin.name, email: admin.email, password: '', role: admin.role, status: admin.status });
+    setErrorMsg(null);
     setModalOpen(true);
   };
 
   const handleSave = async () => {
-    if (!form.name || !form.email) return;
+    if (!form.name || !form.email) {
+      setErrorMsg("Name and email are required");
+      return;
+    }
+    
+    setLoading(true);
+    setErrorMsg(null);
     try {
       if (editTarget) {
-        await updateDoc(doc(db, 'admins', editTarget.id), { ...form });
-        setAdmins(prev => prev.map(a => a.id === editTarget.id ? { ...a, ...form } : a));
+        await updateDoc(doc(db, 'users', editTarget.id), { 
+          name: form.name, 
+          email: form.email, 
+          role: form.role, 
+          status: form.status 
+        });
       } else {
-        const newAdmin = { ...form, createdAt: new Date().toISOString().split('T')[0] };
-        const ref = await addDoc(collection(db, 'admins'), newAdmin);
-        setAdmins(prev => [...prev, { id: ref.id, ...newAdmin }]);
+        if (!form.password || form.password.length < 6) {
+          setErrorMsg("Password is required and must be at least 6 characters for new admins");
+          setLoading(false);
+          return;
+        }
+
+        // Create secondary app to avoid signing out the current user
+        const secondaryApp = initializeApp(app.options, 'SecondaryApp');
+        const secondaryAuth = getAuth(secondaryApp);
+        
+        try {
+          // Create user in Firebase Auth
+          const userCredential = await createUserWithEmailAndPassword(secondaryAuth, form.email, form.password);
+          const uid = userCredential.user.uid;
+          
+          // Add admin record in Firestore with the auth UID
+          const newAdmin = { 
+            userId: uid,
+            name: form.name,
+            email: form.email,
+            role: form.role,
+            status: form.status,
+            createdAt: new Date().toUTCString(),
+            walletBalance: "0"
+          };
+          
+          await setDoc(doc(db, 'users', uid), newAdmin);
+          
+          // Sign out and delete secondary app
+          await secondaryAuth.signOut();
+        } catch (authError: any) {
+          setErrorMsg(authError.message || "Failed to create user in Auth");
+          setLoading(false);
+          return;
+        }
       }
-    } catch (e) {
-      if (editTarget) {
-        setAdmins(prev => prev.map(a => a.id === editTarget.id ? { ...a, ...form } : a));
-      } else {
-        setAdmins(prev => [...prev, { id: Date.now().toString(), ...form, createdAt: new Date().toISOString().split('T')[0] }]);
-      }
+      setModalOpen(false);
+    } catch (e: any) {
+      console.error("Error saving admin:", e);
+      setErrorMsg(e.message || "An error occurred while saving");
+    } finally {
+      setLoading(false);
     }
-    setModalOpen(false);
   };
 
   const handleDisable = async (id: string) => {
-    try { await updateDoc(doc(db, 'admins', id), { status: 'disabled' }); } catch (e) {}
-    setAdmins(prev => prev.map(a => a.id === id ? { ...a, status: 'disabled' } : a));
+    try { await updateDoc(doc(db, 'users', id), { status: 'disabled' }); } catch (e) {}
   };
 
   const handleDelete = async (id: string) => {
-    try { await deleteDoc(doc(db, 'admins', id)); } catch (e) {}
-    setAdmins(prev => prev.filter(a => a.id !== id));
+    try { 
+      // Note: We can delete the Firestore doc, but deleting from Firebase Auth requires Admin SDK/Backend
+      await deleteDoc(doc(db, 'users', id)); 
+    } catch (e) {}
     setDeleteConfirm(null);
   };
 
@@ -215,8 +255,16 @@ export const AdminManagement: React.FC = () => {
                 <label className="text-gray-400 text-sm block mb-1">Email Address</label>
                 <input type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
                   className="w-full bg-gray-800 border border-gray-700 text-white px-3 py-2.5 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
-                  placeholder="admin@omni.com" />
+                  placeholder="admin@omni.com" disabled={!!editTarget} />
               </div>
+              {!editTarget && (
+                <div>
+                  <label className="text-gray-400 text-sm block mb-1">Temporary Password</label>
+                  <input type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
+                    className="w-full bg-gray-800 border border-gray-700 text-white px-3 py-2.5 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    placeholder="Enter password (min 6 chars)" />
+                </div>
+              )}
               <div>
                 <label className="text-gray-400 text-sm block mb-1">Role</label>
                 <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value as AdminRole }))}
@@ -233,9 +281,15 @@ export const AdminManagement: React.FC = () => {
                 </select>
               </div>
             </div>
+            {errorMsg && (
+              <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
+                {errorMsg}
+              </div>
+            )}
             <div className="flex gap-3 mt-6">
-              <button onClick={() => setModalOpen(false)} className="flex-1 py-2.5 rounded-lg border border-gray-700 text-gray-300 hover:bg-gray-800 text-sm transition-colors">Cancel</button>
-              <button onClick={handleSave} className="flex-1 py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors">
+              <button onClick={() => setModalOpen(false)} className="flex-1 py-2.5 rounded-lg border border-gray-700 text-gray-300 hover:bg-gray-800 text-sm transition-colors" disabled={loading}>Cancel</button>
+              <button onClick={handleSave} className="flex-1 py-2.5 rounded-lg bg-orange-500 hover:bg-orange-600 text-white text-sm font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-2" disabled={loading}>
+                {loading ? <span className="w-4 h-4 border-2 border-white/20 border-t-white rounded-full animate-spin" /> : null}
                 {editTarget ? 'Save Changes' : 'Create Admin'}
               </button>
             </div>

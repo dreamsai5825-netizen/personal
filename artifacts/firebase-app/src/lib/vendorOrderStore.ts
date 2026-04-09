@@ -1,3 +1,6 @@
+import { collection, doc, onSnapshot, query, updateDoc, where } from 'firebase/firestore';
+import { db } from '../firebase';
+
 export type VendorOrderStatus = 'New' | 'Accepted' | 'Preparing' | 'Ready for Pickup' | 'Picked Up' | 'Completed' | 'Rejected';
 
 export interface VendorOrder {
@@ -16,69 +19,92 @@ export interface VendorOrder {
 
 type Listener = () => void;
 
-export function createOrderStore(storageKey: string, defaultOrders: VendorOrder[]) {
+export function createOrderStore(vendorType: 'food' | 'grocery') {
   const listeners = new Set<Listener>();
+  let currentOrders: VendorOrder[] = [];
+  let unsubscribe: (() => void) | null = null;
 
-  function load(): VendorOrder[] {
-    try {
-      const raw = localStorage.getItem(storageKey);
-      return raw ? JSON.parse(raw) : defaultOrders;
-    } catch {
-      return defaultOrders;
-    }
-  }
-
-  function save(orders: VendorOrder[]) {
-    localStorage.setItem(storageKey, JSON.stringify(orders));
-    listeners.forEach(l => l());
+  function initFirebaseListener() {
+    if (unsubscribe) return;
+    const q = query(collection(db, 'orders'), where('orderType', '==', vendorType));
+    unsubscribe = onSnapshot(q, (snapshot) => {
+      const liveOrders: VendorOrder[] = snapshot.docs.map(docSnap => {
+        const data = docSnap.data();
+        return {
+          id: docSnap.id,
+          customer: data.customerName || 'Unknown Customer',
+          phone: data.customerPhone || '+91 0000000000',
+          items: Array.isArray(data.items) 
+            ? data.items.map((i: any) => `${i.quantity}x ${i.productId || 'Item'}`).join(', ') 
+            : (data.items || 'Items not specified'),
+          amount: `₹${data.totalPrice || 0}`,
+          status: (data.orderStatus as VendorOrderStatus) || 'New',
+          time: new Date(data.createdAt?.seconds * 1000 || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          address: data.deliveryAddress || 'Unknown Address',
+          rejectionReason: data.rejectionReason,
+          timestamp: data.createdAt?.seconds * 1000 || Date.now(),
+          notified: data.notified ?? false,
+        };
+      });
+      
+      currentOrders = liveOrders.sort((a, b) => b.timestamp - a.timestamp);
+      listeners.forEach(l => l());
+    }, (error) => {
+      console.error(`Error fetching ${vendorType} orders:`, error);
+    });
   }
 
   return {
-    getOrders: (): VendorOrder[] => load(),
+    getOrders: (): VendorOrder[] => currentOrders,
 
-    updateStatus: (id: string, status: VendorOrderStatus, rejectionReason?: string) => {
-      const orders = load().map(o =>
-        o.id === id
-          ? { ...o, status, ...(rejectionReason !== undefined ? { rejectionReason } : {}), notified: true }
-          : o
-      );
-      save(orders);
+    updateStatus: async (id: string, status: VendorOrderStatus, rejectionReason?: string) => {
+      try {
+        const orderRef = doc(db, 'orders', id);
+        const updateData: any = { orderStatus: status, notified: true };
+        if (rejectionReason !== undefined) {
+          updateData.rejectionReason = rejectionReason;
+        }
+        await updateDoc(orderRef, updateData);
+      } catch (e) {
+        console.error("Failed to update status in Firebase:", e);
+        // Optimistic update
+        currentOrders = currentOrders.map(o => o.id === id ? { ...o, status, ...(rejectionReason ? { rejectionReason } : {}), notified: true } : o);
+        listeners.forEach(l => l());
+      }
     },
 
-    markNotified: (id: string) => {
-      const orders = load().map(o => o.id === id ? { ...o, notified: true } : o);
-      save(orders);
+    markNotified: async (id: string) => {
+      try {
+        const orderRef = doc(db, 'orders', id);
+        await updateDoc(orderRef, { notified: true });
+      } catch (e) {
+        // Optimistic update
+        currentOrders = currentOrders.map(o => o.id === id ? { ...o, notified: true } : o);
+        listeners.forEach(l => l());
+      }
     },
 
     subscribe: (fn: Listener) => {
       listeners.add(fn);
-      return () => { listeners.delete(fn); };
+      if (listeners.size === 1) {
+        initFirebaseListener();
+      }
+      return () => { 
+        listeners.delete(fn); 
+        if (listeners.size === 0 && unsubscribe) {
+          unsubscribe();
+          unsubscribe = null;
+        }
+      };
     },
 
-    getNewCount: (): number => load().filter(o => o.status === 'New').length,
-    getPendingNotifCount: (): number => load().filter(o => !o.notified).length,
+    getNewCount: (): number => currentOrders.filter(o => o.status === 'New').length,
+    getPendingNotifCount: (): number => currentOrders.filter(o => !o.notified).length,
   };
 }
 
-const foodDefaults: VendorOrder[] = [
-  { id: '#1031', customer: 'Rahul Sharma', phone: '+91 9876543210', items: 'Chicken Burger x2, Fries x1', amount: '₹548', status: 'New', time: '12:45 PM', address: 'HSR Layout, Bengaluru', timestamp: Date.now() - 60000, notified: false },
-  { id: '#1030', customer: 'Priya Patel', phone: '+91 9123456780', items: 'Margherita Pizza x1, Coke x2', amount: '₹420', status: 'Preparing', time: '12:30 PM', address: 'Koramangala, Bengaluru', timestamp: Date.now() - 900000, notified: true },
-  { id: '#1029', customer: 'Amit Kumar', phone: '+91 9988776655', items: 'Chicken Biryani x2', amount: '₹598', status: 'Ready for Pickup', time: '12:10 PM', address: 'Indiranagar, Bengaluru', timestamp: Date.now() - 2100000, notified: true },
-  { id: '#1028', customer: 'Sneha Reddy', phone: '+91 9871234560', items: 'Caesar Salad x1, OJ x1', amount: '₹280', status: 'Picked Up', time: '11:55 AM', address: 'BTM Layout, Bengaluru', timestamp: Date.now() - 3000000, notified: true },
-  { id: '#1027', customer: 'Kiran Mehta', phone: '+91 9765432108', items: 'Paneer Wrap x2, Lassi x2', amount: '₹460', status: 'Completed', time: '11:30 AM', address: 'Whitefield, Bengaluru', timestamp: Date.now() - 4500000, notified: true },
-  { id: '#1026', customer: 'Rohan Singh', phone: '+91 9543210987', items: 'Veg Burger x1', amount: '₹180', status: 'Rejected', time: '11:10 AM', address: 'JP Nagar, Bengaluru', timestamp: Date.now() - 5400000, notified: true, rejectionReason: 'Item currently unavailable' },
-];
-
-const groceryDefaults: VendorOrder[] = [
-  { id: '#G204', customer: 'Meena Iyer', phone: '+91 9812345670', items: 'Amul Milk 1L x2, Brown Bread x1', amount: '₹185', status: 'New', time: '12:50 PM', address: 'Jayanagar, Bengaluru', timestamp: Date.now() - 30000, notified: false },
-  { id: '#G203', customer: 'Suresh Nair', phone: '+91 9900123456', items: 'Basmati Rice 5kg x1, Toor Dal 1kg x1', amount: '₹640', status: 'Accepted', time: '12:20 PM', address: 'Malleswaram, Bengaluru', timestamp: Date.now() - 1800000, notified: true },
-  { id: '#G202', customer: 'Anita Rao', phone: '+91 9845612340', items: 'Fresh Tomatoes 1kg x2, Onions 2kg x1', amount: '₹210', status: 'Preparing', time: '12:00 PM', address: 'Yelahanka, Bengaluru', timestamp: Date.now() - 2700000, notified: true },
-  { id: '#G201', customer: 'Deepak Verma', phone: '+91 9711234560', items: 'Amul Butter 500g x1, Eggs 12pk x1', amount: '₹320', status: 'Completed', time: '11:00 AM', address: 'Rajajinagar, Bengaluru', timestamp: Date.now() - 6300000, notified: true },
-  { id: '#G200', customer: 'Latha Krishnan', phone: '+91 9632145780', items: 'Organic Spinach x2, Carrots 1kg x1', amount: '₹150', status: 'Rejected', time: '10:30 AM', address: 'Hebbal, Bengaluru', timestamp: Date.now() - 8100000, notified: true, rejectionReason: 'Out of stock today' },
-];
-
-export const foodOrderStore = createOrderStore('omni_food_orders_v1', foodDefaults);
-export const groceryOrderStore = createOrderStore('omni_grocery_orders_v1', groceryDefaults);
+export const foodOrderStore = createOrderStore('food');
+export const groceryOrderStore = createOrderStore('grocery');
 
 export const nextStatus: Partial<Record<VendorOrderStatus, VendorOrderStatus>> = {
   New: 'Accepted',

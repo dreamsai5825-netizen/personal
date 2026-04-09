@@ -16,17 +16,24 @@ import {
 } from 'lucide-react';
 import { RideRequest, DriverTransaction } from '../types';
 import { cn } from '../lib/utils';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 type Tab = 'orders' | 'rides' | 'wallet' | 'ratings' | 'profile';
+
+const isDriverTab = (value: string | null): value is Tab =>
+  value === 'orders' || value === 'rides' || value === 'wallet' || value === 'ratings' || value === 'profile';
 
 const DRIVER_CUT = 0.8;
 
 export const DriverDashboard: React.FC = () => {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [activeTab, setActiveTab] = useState<Tab>('orders');
+  const [activeTab, setActiveTab] = useState<Tab>(() => {
+    const requestedTab = searchParams.get('tab');
+    return isDriverTab(requestedTab) ? requestedTab : 'orders';
+  });
   const [isAvailable, setIsAvailable] = useState<boolean>(
     profile?.driverProfile?.isAvailable ?? true
   );
@@ -68,6 +75,18 @@ export const DriverDashboard: React.FC = () => {
   const [uploadingFile, setUploadingFile] = useState<string | null>(null);
   const [savingProfile, setSavingProfile] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
+
+  useEffect(() => {
+    const requestedTab = searchParams.get('tab');
+    if (isDriverTab(requestedTab) && requestedTab !== activeTab) {
+      setActiveTab(requestedTab);
+    }
+  }, [searchParams, activeTab]);
+
+  const handleTabChange = (nextTab: Tab) => {
+    setActiveTab(nextTab);
+    setSearchParams({ tab: nextTab }, { replace: true });
+  };
 
   /* ── Redirect if not driver ── */
   useEffect(() => {
@@ -193,7 +212,7 @@ export const DriverDashboard: React.FC = () => {
         assignedDriverPhone: profile?.phone || '',
       });
       setNotification(null);
-      setActiveTab('rides');
+      handleTabChange('rides');
     } catch (e) { console.error(e); }
     finally { setAccepting(null); }
   };
@@ -328,6 +347,29 @@ export const DriverDashboard: React.FC = () => {
     { id: 'ratings', label: 'Ratings', icon: Star },
     { id: 'profile', label: 'Profile', icon: User },
   ];
+
+  const activeTabMeta: Record<Tab, { title: string; subtitle: string }> = {
+    orders: {
+      title: 'Incoming Orders',
+      subtitle: isAvailable ? 'Review and accept nearby ride requests.' : 'You are offline. Go online to receive ride requests.',
+    },
+    rides: {
+      title: 'Ride Operations',
+      subtitle: 'Track your active trip and recent ride history.',
+    },
+    wallet: {
+      title: 'Driver Wallet',
+      subtitle: 'Monitor earnings, credits, and recent transactions.',
+    },
+    ratings: {
+      title: 'Performance',
+      subtitle: 'See ratings, ride milestones, and service quality trends.',
+    },
+    profile: {
+      title: 'Driver Profile',
+      subtitle: 'Manage your documents, vehicle details, and personal info.',
+    },
+  };
 
   /* ═══════════════ TAB RENDERERS ═══════════════ */
 
@@ -882,10 +924,105 @@ export const DriverDashboard: React.FC = () => {
 
   /* ═══════════════ MAIN RENDER ═══════════════ */
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col max-w-md mx-auto relative">
+    <div className="min-h-screen bg-gray-50 md:bg-[#0b1220] md:p-6">
+      <div className="relative mx-auto flex min-h-screen max-w-md flex-col bg-gray-50 md:min-h-[calc(100vh-3rem)] md:max-w-7xl md:flex-row md:overflow-hidden md:rounded-[32px] md:border md:border-slate-800 md:bg-slate-950 md:shadow-[0_24px_80px_rgba(0,0,0,0.35)]">
+        <aside className="hidden md:flex md:w-80 md:flex-col md:border-r md:border-slate-800 md:bg-gradient-to-b md:from-slate-950 md:via-slate-900 md:to-slate-950">
+          <div className="border-b border-slate-800 px-6 py-6">
+            <div className="flex items-center gap-4">
+              <div className="relative">
+                {profilePhoto
+                  ? <img src={profilePhoto} alt="Driver" className="h-14 w-14 rounded-2xl border border-white/10 object-cover" />
+                  : <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-500/20">
+                      <User className="h-7 w-7 text-orange-300" />
+                    </div>}
+                <div className={cn(
+                  'absolute -bottom-1 -right-1 h-4 w-4 rounded-full border-2 border-slate-950',
+                  isAvailable ? 'bg-emerald-400' : 'bg-slate-500',
+                )} />
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs uppercase tracking-[0.25em] text-slate-400">Driver Console</p>
+                <h1 className="truncate text-xl font-bold text-white">{profile?.name || 'Driver'}</h1>
+                <p className="truncate text-sm text-slate-400">{profile?.email || 'driver@omniserve.in'}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="px-6 py-5">
+            <button
+              onClick={handleToggleAvailability}
+              className={cn(
+                'flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left transition-all',
+                isAvailable
+                  ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                  : 'border-slate-700 bg-slate-900 text-slate-300',
+              )}
+            >
+              <div>
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Status</p>
+                <p className="mt-1 text-sm font-semibold">{isAvailable ? 'Online and receiving requests' : 'Offline and paused'}</p>
+              </div>
+              {isAvailable ? <ToggleRight className="h-6 w-6" /> : <ToggleLeft className="h-6 w-6" />}
+            </button>
+          </div>
+
+          <nav className="flex-1 px-4 pb-4">
+            <div className="space-y-2">
+              {tabs.map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => handleTabChange(tab.id)}
+                  className={cn(
+                    'flex w-full items-center gap-3 rounded-2xl px-4 py-3 text-left transition-all',
+                    activeTab === tab.id
+                      ? 'bg-orange-500 text-white shadow-lg shadow-orange-500/20'
+                      : 'text-slate-300 hover:bg-slate-900 hover:text-white',
+                  )}
+                >
+                  <div className="relative">
+                    <tab.icon className="h-5 w-5" />
+                    {tab.badge ? (
+                      <span className="absolute -right-2 -top-2 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white">
+                        {tab.badge}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold">{tab.label}</p>
+                  </div>
+                  {activeTab === tab.id ? <ChevronRight className="h-4 w-4" /> : null}
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-6 grid grid-cols-1 gap-3">
+              {[
+                { label: 'Wallet Balance', value: `Rs ${walletBalance.toLocaleString('en-IN')}`, tone: 'text-emerald-300' },
+                { label: 'Driver Rating', value: rating.toFixed(1), tone: 'text-amber-300' },
+                { label: 'Completed Rides', value: totalRides.toString(), tone: 'text-sky-300' },
+              ].map(stat => (
+                <div key={stat.label} className="rounded-2xl border border-slate-800 bg-slate-900/80 px-4 py-3">
+                  <p className="text-xs uppercase tracking-[0.2em] text-slate-500">{stat.label}</p>
+                  <p className={cn('mt-2 text-lg font-bold', stat.tone)}>{stat.value}</p>
+                </div>
+              ))}
+            </div>
+          </nav>
+
+          <div className="border-t border-slate-800 p-4">
+            <button
+              onClick={handleSignOut}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl border border-red-500/20 bg-red-500/10 px-4 py-3 font-semibold text-red-300 transition-all hover:bg-red-500/20"
+            >
+              <LogOut className="h-4 w-4" /> Sign Out
+            </button>
+          </div>
+        </aside>
+
+        <div className="flex flex-1 flex-col">
 
       {/* Header */}
-      <div className="bg-gradient-to-r from-orange-500 to-orange-600 px-4 pt-10 pb-5">
+      <div className="bg-gradient-to-r from-orange-500 to-orange-600 px-4 pt-10 pb-5 md:hidden">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="relative">
@@ -915,9 +1052,9 @@ export const DriverDashboard: React.FC = () => {
         {/* Stats */}
         <div className="mt-4 grid grid-cols-3 gap-2">
           {[
-            { label: 'Wallet', value: `₹${walletBalance.toLocaleString('en-IN')}`, onClick: () => setActiveTab('wallet') },
-            { label: 'Rating', value: `⭐ ${rating.toFixed(1)}`, onClick: () => setActiveTab('ratings') },
-            { label: 'Rides', value: totalRides.toString(), onClick: () => setActiveTab('rides') },
+            { label: 'Wallet', value: `Rs ${walletBalance.toLocaleString('en-IN')}`, onClick: () => handleTabChange('wallet') },
+            { label: 'Rating', value: `${rating.toFixed(1)} ★`, onClick: () => handleTabChange('ratings') },
+            { label: 'Rides', value: totalRides.toString(), onClick: () => handleTabChange('rides') },
           ].map(s => (
             <button key={s.label} onClick={s.onClick}
               className="bg-white/20 rounded-xl p-2.5 text-center active:bg-white/30">
@@ -928,12 +1065,33 @@ export const DriverDashboard: React.FC = () => {
         </div>
       </div>
 
+      <div className="hidden items-start justify-between border-b border-slate-800 bg-slate-950/95 px-8 py-6 md:flex">
+        <div>
+          <p className="text-xs uppercase tracking-[0.25em] text-orange-300">Web Driver View</p>
+          <h2 className="mt-2 text-3xl font-bold text-white">{activeTabMeta[activeTab].title}</h2>
+          <p className="mt-2 max-w-2xl text-sm text-slate-400">{activeTabMeta[activeTab].subtitle}</p>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { label: 'Queue', value: newOrders.length, tone: 'text-orange-300' },
+            { label: 'Live Ride', value: activeRide ? 1 : 0, tone: 'text-emerald-300' },
+            { label: 'History', value: rideHistory.length, tone: 'text-sky-300' },
+          ].map(stat => (
+            <div key={stat.label} className="min-w-24 rounded-2xl border border-slate-800 bg-slate-900 px-4 py-3 text-center">
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">{stat.label}</p>
+              <p className={cn('mt-2 text-xl font-bold', stat.tone)}>{stat.value}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Tab content */}
-      <div className="flex-1 overflow-auto pb-20">
+      <div className="flex-1 overflow-auto pb-20 md:pb-0">
         <AnimatePresence mode="wait">
           <motion.div key={activeTab}
             initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.15 }}>
+            exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.15 }}
+            className="md:px-6 md:py-6">
             {activeTab === 'orders' && renderNewOrders()}
             {activeTab === 'rides' && renderMyRides()}
             {activeTab === 'wallet' && renderWallet()}
@@ -944,9 +1102,9 @@ export const DriverDashboard: React.FC = () => {
       </div>
 
       {/* Bottom Tab Bar */}
-      <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-gray-100 flex items-center z-40">
+      <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-gray-100 flex items-center z-40 md:hidden">
         {tabs.map(tab => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+          <button key={tab.id} onClick={() => handleTabChange(tab.id)}
             className={cn('flex-1 flex flex-col items-center py-2.5 gap-0.5 transition-colors',
               activeTab === tab.id ? 'text-orange-500' : 'text-gray-400')}>
             <div className="relative">
@@ -966,6 +1124,8 @@ export const DriverDashboard: React.FC = () => {
             )}
           </button>
         ))}
+      </div>
+        </div>
       </div>
 
       {/* New Ride Notification Popup */}

@@ -12,7 +12,7 @@ import { db } from '../firebase';
 import { Vendor, Product, Order } from '../types';
 import { useAuth } from '../AuthContext';
 import { useSuccess } from './SuccessModal';
-import { motion } from 'motion/react';
+import { motion, AnimatePresence } from 'motion/react';
 import { 
   Search, 
   Filter, 
@@ -30,8 +30,13 @@ import {
   Train,
   Layers,
   Gift,
-  ChevronDown
+  ChevronDown,
+  MapPin,
+  CreditCard,
+  Banknote,
+  X
 } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { formatCurrency, cn } from '../lib/utils';
 
 const TOP_CATEGORIES = [
@@ -58,13 +63,28 @@ const EXPLORE_MORE = [
 ];
 
 export const FoodGrocery: React.FC<{ type: 'food' | 'grocery' }> = ({ type }) => {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { showSuccess } = useSuccess();
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
-  const [cart, setCart] = useState<{ [key: string]: { product: Product, quantity: number } }>({});
+  const [cart, setCart] = useState<{ [key: string]: { product: Product, quantity: number } }>(() => {
+    const saved = localStorage.getItem(`cart_${type}`);
+    return saved ? JSON.parse(saved) : {};
+  });
   const [loading, setLoading] = useState(true);
+  const [checkoutStep, setCheckoutStep] = useState<0 | 1 | 2>(0); // 0: Hidden, 1: Address, 2: Payment
+  const [deliveryAddr, setDeliveryAddr] = useState('');
+  const [phoneNum, setPhoneNum] = useState('');
+  const [paymentMode, setPaymentMode] = useState<'cod' | 'online'>('cod');
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    localStorage.setItem(`cart_${type}`, JSON.stringify(cart));
+    if (selectedVendor) {
+      localStorage.setItem(`vendor_${type}`, JSON.stringify(selectedVendor));
+    }
+  }, [cart, type, selectedVendor]);
 
   useEffect(() => {
     const q = query(
@@ -89,14 +109,25 @@ export const FoodGrocery: React.FC<{ type: 'food' | 'grocery' }> = ({ type }) =>
     if (selectedVendor) {
       const q = query(
         collection(db, 'products'),
-        where('vendorId', '==', selectedVendor.vendorId),
-        where('isAvailable', '==', true)
+        where('vendorId', '==', selectedVendor.vendorId)
       );
 
-      getDocs(q).then(async (snapshot) => {
+      const unsubscribe = onSnapshot(q, async (snapshot) => {
         const productList: Product[] = [];
         snapshot.forEach((doc) => {
-          productList.push({ productId: doc.id, ...doc.data() } as Product);
+          const data = doc.data();
+          // Map VendorProducts format to FoodGrocery format if necessary
+          if (data.status === 'Available' || data.isAvailable === true || data.status === undefined) {
+            productList.push({ 
+              productId: doc.id, 
+              name: data.name,
+              category: data.category || 'Uncategorized',
+              price: data.price,
+              description: data.description,
+              imageURL: data.image || data.imageURL || 'https://images.unsplash.com/photo-1565299624946-b28f40a0ae38?auto=format&fit=crop&w=400&q=80',
+              vendorId: selectedVendor.vendorId
+            } as Product);
+          }
         });
         
         // If it's a grocery store and has no products, add some example ones
@@ -104,32 +135,13 @@ export const FoodGrocery: React.FC<{ type: 'food' | 'grocery' }> = ({ type }) =>
           const mockProducts = [
             { name: 'Fresh Apples', category: 'Fruits', price: 120, description: 'Crispy and sweet red apples, 1kg', imageURL: 'https://images.unsplash.com/photo-1560806887-1e4cd0b6bcd6?auto=format&fit=crop&w=400&q=80' },
             { name: 'Bananas', category: 'Fruits', price: 60, description: 'Ripe yellow bananas, pack of 6', imageURL: 'https://images.unsplash.com/photo-1571771894821-ce9b6c11b08e?auto=format&fit=crop&w=400&q=80' },
-            { name: 'Strawberries', category: 'Fruits', price: 250, description: 'Fresh farm-picked strawberries, 250g', imageURL: 'https://images.unsplash.com/photo-1464965911861-746a04b4bca6?auto=format&fit=crop&w=400&q=80' },
-            { name: 'Grapes', category: 'Fruits', price: 180, description: 'Sweet green seedless grapes, 500g', imageURL: 'https://images.unsplash.com/photo-1537640538966-79f369b41e8f?auto=format&fit=crop&w=400&q=80' },
-            { name: 'Mangoes', category: 'Fruits', price: 300, description: 'Sweet Alphonso mangoes, pack of 2', imageURL: 'https://images.unsplash.com/photo-1553279768-865429fa0078?auto=format&fit=crop&w=400&q=80' },
-            { name: 'Pineapple', category: 'Fruits', price: 150, description: 'Fresh sweet pineapple, 1 unit', imageURL: 'https://images.unsplash.com/photo-1550258114-b834e70e9be1?auto=format&fit=crop&w=400&q=80' },
-            { name: 'Blueberries', category: 'Fruits', price: 450, description: 'Fresh organic blueberries, 125g', imageURL: 'https://images.unsplash.com/photo-1497534446932-c946e7316a33?auto=format&fit=crop&w=400&q=80' },
-            { name: 'Watermelon', category: 'Fruits', price: 120, description: 'Sweet seedless watermelon, 1 unit', imageURL: 'https://images.unsplash.com/photo-1587049352846-4a222e784d38?auto=format&fit=crop&w=400&q=80' },
-            { name: 'Kiwi', category: 'Fruits', price: 200, description: 'Zesty green kiwis, pack of 3', imageURL: 'https://images.unsplash.com/photo-1585059895524-72359e06133a?auto=format&fit=crop&w=400&q=80' },
-            { name: 'Oranges', category: 'Fruits', price: 140, description: 'Juicy Nagpur oranges, 1kg', imageURL: 'https://images.unsplash.com/photo-1547514701-42782101795e?auto=format&fit=crop&w=400&q=80' },
-            { name: 'Carrots', category: 'Vegetables', price: 40, description: 'Fresh organic carrots, 500g', imageURL: 'https://images.unsplash.com/photo-1598170845058-32b9d6a5da37?auto=format&fit=crop&w=400&q=80' },
-            { name: 'Broccoli', category: 'Vegetables', price: 80, description: 'Green broccoli florets, 250g', imageURL: 'https://images.unsplash.com/photo-1452948491233-ad8a1ed01085?auto=format&fit=crop&w=400&q=80' },
-            { name: 'Spinach', category: 'Vegetables', price: 30, description: 'Fresh green spinach leaves, bunch', imageURL: 'https://images.unsplash.com/photo-1576045057995-568f588f82fb?auto=format&fit=crop&w=400&q=80' },
-            { name: 'Bell Peppers', category: 'Vegetables', price: 120, description: 'Mixed color bell peppers, pack of 3', imageURL: 'https://images.unsplash.com/photo-1566576721346-d4a3b4eaad5b?auto=format&fit=crop&w=400&q=80' },
-            { name: 'Milk', category: 'Dairy', price: 55, description: 'Fresh whole milk, 1L', imageURL: 'https://images.unsplash.com/photo-1563636619-e9107da5a1bb?auto=format&fit=crop&w=400&q=80' },
-            { name: 'Cheddar Cheese', category: 'Dairy', price: 320, description: 'Aged cheddar cheese, 200g', imageURL: 'https://images.unsplash.com/photo-1618164435735-413d3b066c9a?auto=format&fit=crop&w=400&q=80' },
-            { name: 'Greek Yogurt', category: 'Dairy', price: 150, description: 'Plain greek yogurt, 400g', imageURL: 'https://images.unsplash.com/photo-1488477181946-6428a0291777?auto=format&fit=crop&w=400&q=80' },
-            { name: 'Whole Wheat Bread', category: 'Bakery', price: 45, description: 'Freshly baked whole wheat bread', imageURL: 'https://images.unsplash.com/photo-1509440159596-0249088772ff?auto=format&fit=crop&w=400&q=80' },
-            { name: 'Chocolate Croissant', category: 'Bakery', price: 90, description: 'Buttery croissant with dark chocolate', imageURL: 'https://images.unsplash.com/photo-1530610476181-d83430b64dcd?auto=format&fit=crop&w=400&q=80' },
-            { name: 'Orange Juice', category: 'Beverages', price: 180, description: '100% pure orange juice, 1L', imageURL: 'https://images.unsplash.com/photo-1613478223719-2ab802602423?auto=format&fit=crop&w=400&q=80' },
-            { name: 'Sparkling Water', category: 'Beverages', price: 60, description: 'Natural sparkling water, 500ml', imageURL: 'https://images.unsplash.com/photo-1551731589-22244e847a1e?auto=format&fit=crop&w=400&q=80' },
           ];
 
           for (const p of mockProducts) {
             const docRef = await addDoc(collection(db, 'products'), {
               ...p,
               vendorId: selectedVendor.vendorId,
-              isAvailable: true,
+              status: 'Available',
               stock: 100
             });
             productList.push({ productId: docRef.id, ...p, vendorId: selectedVendor.vendorId, isAvailable: true, stock: 100 } as Product);
@@ -138,7 +150,9 @@ export const FoodGrocery: React.FC<{ type: 'food' | 'grocery' }> = ({ type }) =>
         
         setProducts(productList);
       });
+      return () => unsubscribe();
     }
+    return undefined;
   }, [selectedVendor, type]);
 
   const addToCart = (product: Product) => {
@@ -172,39 +186,13 @@ export const FoodGrocery: React.FC<{ type: 'food' | 'grocery' }> = ({ type }) =>
     return acc;
   }, {} as { [key: string]: Product[] });
 
-  const handleCheckout = async () => {
-    if (!user || !selectedVendor) return;
-
-    try {
-      const orderData = {
-        userId: user.uid,
-        vendorId: selectedVendor.vendorId,
-        orderType: type,
-        items: Object.values(cart).map((item: any) => ({
-          productId: item.product.productId,
-          quantity: item.quantity,
-          price: item.product.price
-        })),
-        totalPrice: cartTotal,
-        deliveryFee: 40,
-        paymentStatus: 'pending',
-        orderStatus: 'pending',
-        createdAt: new Date().toISOString(),
-        addressId: 'default_address' // In real app, user selects address
-      };
-
-      await addDoc(collection(db, 'orders'), orderData);
-      setCart({});
-      setSelectedVendor(null);
-      showSuccess(
-        'Order Placed!', 
-        `Your ${type} order from ${selectedVendor.vendorName} has been successfully placed.`,
-        'Track Order',
-        '/orders'
-      );
-    } catch (error) {
-      console.error("Error placing order:", error);
+  const startCheckout = () => {
+    if (!selectedVendor) return;
+    if (!user) {
+      navigate('/login', { state: { returnTo: `/checkout`, cartData: { cart, type, vendor: selectedVendor } } });
+      return;
     }
+    navigate('/checkout', { state: { cartData: { cart, type, vendor: selectedVendor } } });
   };
 
   if (loading) return <div className="p-20 text-center">Loading...</div>;
@@ -460,7 +448,7 @@ export const FoodGrocery: React.FC<{ type: 'food' | 'grocery' }> = ({ type }) =>
                   </div>
 
                   <button 
-                    onClick={handleCheckout}
+                    onClick={startCheckout}
                     className="w-full bg-orange-500 text-white py-4 rounded-2xl font-bold text-lg hover:bg-orange-600 transition-all shadow-xl shadow-orange-200"
                   >
                     Checkout

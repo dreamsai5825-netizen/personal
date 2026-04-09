@@ -4,7 +4,8 @@ import { auth, db } from '../firebase';
 import { doc, updateDoc } from 'firebase/firestore';
 import { updateProfile, updateEmail, sendEmailVerification } from 'firebase/auth';
 import { motion } from 'motion/react';
-import { User as UserIcon, Mail, Phone, MapPin, Camera, Save, AlertCircle, CheckCircle, Edit3 } from 'lucide-react';
+import { User as UserIcon, Mail, Phone, MapPin, Camera, Save, AlertCircle, CheckCircle, Edit3, Plus } from 'lucide-react';
+import { openRazorpayPayment } from '../lib/razorpay';
 
 export const Profile: React.FC = () => {
   const { user, profile, isEmailVerified } = useAuth();
@@ -68,6 +69,37 @@ export const Profile: React.FC = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const [showAddMoney, setShowAddMoney] = useState(false);
+  const [addAmount, setAddAmount] = useState('500');
+
+  const handleAddMoney = () => {
+    const amount = Number(addAmount);
+    if (!amount || amount <= 0 || !user || !profile) return;
+
+    setLoading(true);
+    openRazorpayPayment(
+      amount,
+      { name: profile.name, email: user.email || '', phone: profile.phone || '' },
+      async (res: any) => {
+        try {
+          const profileRef = doc(db, 'users', user.uid);
+          const newBalance = (profile.walletBalance || 0) + amount;
+          await updateDoc(profileRef, { walletBalance: newBalance });
+          setSuccess(`Successfully added ₹${amount} to your wallet!`);
+          setShowAddMoney(false);
+        } catch (e) {
+          setError('Failed to update wallet balance.');
+        } finally {
+          setLoading(false);
+        }
+      },
+      (err: any) => {
+        setError('Payment failed or was cancelled.');
+        setLoading(false);
+      }
+    );
   };
 
   if (!user || !profile) {
@@ -225,8 +257,51 @@ export const Profile: React.FC = () => {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">Wallet Balance</label>
-                <p className="text-2xl font-bold text-green-600">₹{profile.walletBalance || 0}</p>
+                <div className="flex items-center justify-between bg-gray-50 border border-gray-100 rounded-2xl px-6 py-4">
+                  <p className="text-3xl font-bold text-green-600">₹{profile.walletBalance || 0}</p>
+                  <button
+                    onClick={() => setShowAddMoney(true)}
+                    className="flex items-center gap-2 px-4 py-2 bg-green-100 text-green-700 rounded-xl font-bold hover:bg-green-200 transition-colors"
+                  >
+                    <Plus className="w-4 h-4" /> Add Money
+                  </button>
+                </div>
               </div>
+
+              {showAddMoney && (
+                <div className="bg-green-50 border border-green-200 rounded-2xl p-6 space-y-4">
+                  <h3 className="text-green-800 font-bold">Add Balance</h3>
+                  <div className="flex gap-4">
+                    <div className="relative flex-1">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">₹</span>
+                      <input 
+                        type="number" 
+                        value={addAmount}
+                        onChange={e => setAddAmount(e.target.value)}
+                        className="w-full pl-8 pr-4 py-3 bg-white border border-green-200 rounded-xl focus:ring-2 focus:ring-green-500 outline-none font-bold text-green-700"
+                      />
+                    </div>
+                    <button 
+                      onClick={handleAddMoney}
+                      disabled={loading || !addAmount}
+                      className="px-6 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 disabled:opacity-50"
+                    >
+                      {loading ? 'Processing...' : 'Pay with Razorpay'}
+                    </button>
+                  </div>
+                  <div className="flex gap-2">
+                    {['500', '1000', '2000'].map(amt => (
+                      <button 
+                        key={amt} 
+                        onClick={() => setAddAmount(amt)}
+                        className="px-3 py-1.5 bg-white border border-green-200 text-green-700 rounded-lg text-sm font-bold hover:bg-green-100"
+                      >
+                        +₹{amt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {isEditing && (
                 <div className="flex justify-end pt-6">

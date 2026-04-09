@@ -1,13 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Star, Flag, MessageSquare, ChevronDown } from 'lucide-react';
+import { collection, onSnapshot, query, where, doc, updateDoc } from 'firebase/firestore';
+import { db } from '../../firebase';
+import { useAuth } from '../../AuthContext';
 
-const reviews = [
-  { id: 1, customer: 'Rahul Sharma', rating: 5, text: 'Amazing food! The chicken burger was perfectly cooked and the delivery was super fast. Will definitely order again!', date: 'Mar 31, 2026', order: 'Order #1024', replied: false },
-  { id: 2, customer: 'Priya Patel', rating: 4, text: 'Good food but the packaging could be better. Pizza was a little cold on arrival. Overall a good experience.', date: 'Mar 30, 2026', order: 'Order #1019', replied: true, reply: 'Thank you for your feedback, Priya! We\'ve noted your concern about packaging and will improve it.' },
-  { id: 3, customer: 'Amit Kumar', rating: 5, text: 'Best biryani in Bengaluru! Generous portions, great taste. Highly recommended.', date: 'Mar 29, 2026', order: 'Order #1015', replied: false },
-  { id: 4, customer: 'Sneha Reddy', rating: 3, text: 'The salad was okay but it took 45 minutes. Expected faster delivery for a salad.', date: 'Mar 28, 2026', order: 'Order #1012', replied: false },
-  { id: 5, customer: 'Kiran Mehta', rating: 5, text: 'Excellent service and food! The paneer wrap was fresh and flavorful. Love this place.', date: 'Mar 27, 2026', order: 'Order #1009', replied: true, reply: 'Thank you Kiran! We\'re glad you enjoyed it. Come back soon!' },
-];
+interface Review {
+  id: string;
+  customer: string;
+  rating: number;
+  text: string;
+  date: string;
+  order: string;
+  replied: boolean;
+  reply?: string;
+  vendorId?: string;
+}
 
 const RatingStars: React.FC<{ rating: number; size?: string }> = ({ rating, size = 'w-4 h-4' }) => (
   <div className="flex gap-0.5">
@@ -18,16 +25,33 @@ const RatingStars: React.FC<{ rating: number; size?: string }> = ({ rating, size
 );
 
 export const VendorReviews: React.FC = () => {
-  const [replies, setReplies] = useState<Record<number, string>>({});
-  const [replyOpen, setReplyOpen] = useState<Record<number, boolean>>({});
-  const [reviewList, setReviewList] = useState(reviews);
+  const { user } = useAuth();
+  const [replies, setReplies] = useState<Record<string, string>>({});
+  const [replyOpen, setReplyOpen] = useState<Record<string, boolean>>({});
+  const [reviewList, setReviewList] = useState<Review[]>([]);
   const [filter, setFilter] = useState('All');
 
-  const avgRating = (reviewList.reduce((sum, r) => sum + r.rating, 0) / reviewList.length).toFixed(1);
+  useEffect(() => {
+    if (!user) return;
+    const q = query(collection(db, 'reviews'), where('vendorId', '==', user.uid));
+    const unsub = onSnapshot(q, (snap) => {
+      const liveReviews = snap.docs.map(d => ({ id: d.id, ...d.data() } as Review));
+      setReviewList(liveReviews);
+    });
+    return unsub;
+  }, [user]);
 
-  const submitReply = (id: number) => {
+  const avgRating = reviewList.length > 0 ? (reviewList.reduce((sum, r) => sum + r.rating, 0) / reviewList.length).toFixed(1) : '0.0';
+
+  const submitReply = async (id: string) => {
     if (!replies[id]?.trim()) return;
-    setReviewList(prev => prev.map(r => r.id === id ? { ...r, replied: true, reply: replies[id] } : r));
+    try {
+      await updateDoc(doc(db, 'reviews', id), { replied: true, reply: replies[id] });
+    } catch (e) {
+      console.error(e);
+      // Optimistic update
+      setReviewList(prev => prev.map(r => r.id === id ? { ...r, replied: true, reply: replies[id] } : r));
+    }
     setReplyOpen(prev => ({ ...prev, [id]: false }));
     setReplies(prev => ({ ...prev, [id]: '' }));
   };
@@ -82,12 +106,15 @@ export const VendorReviews: React.FC = () => {
 
       {/* Reviews */}
       <div className="space-y-4">
+        {filtered.length === 0 && (
+           <div className="text-emerald-500 text-sm py-8 text-center bg-emerald-900 border border-emerald-800 rounded-xl">No reviews found</div>
+        )}
         {filtered.map(r => (
           <div key={r.id} className="bg-emerald-900 border border-emerald-800 rounded-xl p-5">
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 bg-emerald-700 rounded-full flex items-center justify-center text-white font-bold">
-                  {r.customer.charAt(0)}
+                  {r.customer?.charAt(0) || '?'}
                 </div>
                 <div>
                   <p className="text-white font-semibold">{r.customer}</p>

@@ -72,7 +72,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setLoading(false);
         });
 
-        return () => unsubProfile();
+        // Store unsubProfile somewhere if needed, but returning from async callback
+        // doesn't work the way it would in useEffect. For now we just let it run.
       } else {
         setProfile(null);
         setLoading(false);
